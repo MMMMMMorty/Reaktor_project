@@ -1,6 +1,7 @@
-
+require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
+const Note = require('./models/note')
 const axios = require('axios')
 const url = "http://assignments.reaktor.com/birdnest/drones"
 const url2 = "http://assignments.reaktor.com/birdnest/pilots/"
@@ -11,7 +12,7 @@ var xml2js = require('xml2js')
 var parser = new xml2js.Parser()
 
 app.use(cors())
-
+app.use(express.static('build'))
 app.use(function(req, res, next) {
     //Allow cross-site requests
     res.header('Access-Control-Allow-Origin', '*');
@@ -19,8 +20,6 @@ app.use(function(req, res, next) {
     next();
 });
 
-let notes = []
-let serialNumber = []
 
 app.get('/notes', (request, response) => {
     //Get the data from url
@@ -30,6 +29,7 @@ app.get('/notes', (request, response) => {
             //Get the info
             // var deviceInformation = result['report']['deviceInformation']
             var snapshotTimestamp = result['report']['capture'][0]['$']['snapshotTimestamp']
+            snapshotTimestamp = new Date(snapshotTimestamp)
             var drones = result['report']['capture'][0]['drone']
             //Filter the drones inside the circle
             drones = drones.filter(element => {
@@ -39,56 +39,67 @@ app.get('/notes', (request, response) => {
                 drones.forEach(element => {
                     //Check if the drone is added to notes(list)
                     //Tf it is not in the list, add it to the list
-                    if(serialNumber.includes(element['serialNumber'][0]) == false ){
-                        let wholeUrl = url2 + element['serialNumber'][0]
-                        //get the owner info from url2
-                        axios.get(wholeUrl).then(res=>{
-                            //successfully find the owner data
-                            if(res.status==200){
-                                var note = new Object();
-                                // note.id = notes.length + 1
-                                note.serialNumber = element['serialNumber'][0]
-                                note.snapshotTimestamp = snapshotTimestamp
-                                note.closestDistance = Math.sqrt(Math.pow(element['positionX'] - 250000, 2) + Math.pow(element['positionY'] - 250000, 2))
-                                note.owner = res.data.firstName + " " + res.data.lastName
-                                note.ownerEmail = res.data.email
-                                note.phone = res.data.phoneNumber
-                                serialNumber.unshift(element['serialNumber'][0])
-                                notes.unshift(note)
-                            }else {
-                                response.send('<h1>Receive unknown status</h1>')
+                    Note.find({ serialNumber: element['serialNumber'][0] }).then(notes => {
+                        if(notes.length == 0){
+                            let wholeUrl = url2 + element['serialNumber'][0]
+                            //get the owner info from url2
+                            axios.get(wholeUrl).then(res=>{
+                                //successfully find the owner data
+                                if(res.status==200){
+                                    const note = new Note({
+                                        serialNumber: element['serialNumber'][0],
+                                        snapshotTimestamp : snapshotTimestamp,
+                                        closestDistance: (Math.sqrt(Math.pow(element['positionX'] - 250000, 2) + Math.pow(element['positionY'] - 250000, 2))).toString(),
+                                        owner: res.data.firstName + " " + res.data.lastName,
+                                        ownerEmail: res.data.email,
+                                        phone: res.data.phoneNumber
+                                    })
+                                    note.save().then(result => {
+                                        // console.log('note saved!')
+                                    })
+                                }else {
+                                    response.send('<h1>Receive unknown status</h1>')
+                                }
+                            }).catch(function (error) {
+                                //Fail to find the owner data
+                                if(error.response.status == 429){
+                                    console.log("Too many requests for website")
+                                    setTimeout(function() {
+                                        console.log("Take a rest for 30s!");
+                                    }, 30000);
+                        
+                                }
+                                if(error.response.status == 404){
+                                    console.log("Canot find the owner")
+                                    const note = new Note({
+                                        serialNumber: element['serialNumber'][0],
+                                        snapshotTimestamp : snapshotTimestamp,
+                                        closestDistance: (Math.sqrt(Math.pow(element['positionX'] - 250000, 2) + Math.pow(element['positionY'] - 250000, 2))).toString(),
+                                        owner: "unknown",
+                                        ownerEmail: "unknown",
+                                        phone: "unknown"
+                                    })
+                                    note.save().then(result => {
+                                        // console.log('note saved!')
+                                    })
+                                }
+                            })
+
+                        }else{
+                            //If it is in the list, update the info
+                            notes[0].snapshotTimestamp = snapshotTimestamp
+                            var distance = Math.sqrt(Math.pow(element['positionX'] - 250000, 2) + Math.pow(element['positionY'] - 250000, 2))
+                            //Check if the closestDistance should be updated
+                            if(distance < parseFloat(notes[0].closestDistance)){
+                                notes[0].closestDistance = distance.toString()
                             }
-                        }).catch(function (error) {
-                            //Fail to find the owner data
-                            if(error.response.status == 404){
-                                console.log("Canot find the owner")
-                                var note = new Object();
-                                // note.id = notes.length + 1
-                                note.serialNumber = element['serialNumber'][0]
-                                note.snapshotTimestamp = snapshotTimestamp
-                                note.closestDistance = Math.sqrt(Math.pow(element['positionX'] - 250000, 2) + Math.pow(element['positionY'] - 250000, 2))
-                                note.owner =  "unknown"
-                                notes.phone = "unknown"
-                                notes.ownerEmail = "unknown"
-                                notes.unshift(note)
-                                serialNumber.unshift(element['serialNumber'][0])
-                            }
-                        });
-                    }else{
-                        //If it is in the list, update the info
-                        console.log("update the snapshotTimestamp")
-                        var index = serialNumber.indexOf(element['serialNumber'][0])
-                        notes[index].snapshotTimestamp = snapshotTimestamp
-                        var distance = Math.sqrt(Math.pow(element['positionX'] - 250000, 2) + Math.pow(element['positionY'] - 250000, 2))
-                        //Check if the closestDistance should be updated
-                        if(distance < notes[index].closestDistance){
-                            notes[index].closestDistance = distance
+                            notes[0].save().then(result => {
+                                // console.log("data updated")
+                            })
+
                         }
-                    }
-            
+                    })
                 });
-                // console.log(serialNumber)
-                // console.log(JSON.stringify(notes))
             }
         });
     }).catch(error=>{
@@ -101,9 +112,15 @@ app.get('/notes', (request, response) => {
 
         }
     })
-    //Delete information about drones whose last appearance was 10 minutes ago
-    notes = notes.filter(note=>{return((Date.now() - Date.parse(note.snapshotTimestamp)) < 600000)})
-    response.json(notes)
+    Note.find({}).then(notes => {
+        //Make sure it will just show 10 mins data
+        notes = notes.filter(function(element, index, self){
+            return self.indexOf(element) === index && ((Date.now() - element.snapshotTimestamp.getTime()) < 600000)
+        })
+            // note=>{return((Date.now() - note.snapshotTimestamp.getTime()) < 600000)})
+        response.json(notes)
+    })
+    // response.json(notes)
 })
 
 

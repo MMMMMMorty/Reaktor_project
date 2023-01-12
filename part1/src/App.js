@@ -1,22 +1,22 @@
 import { useState,  useEffect} from 'react'
 import './App.css'
 import axios from 'axios'
+const baseUrl = '/notes'
 
 const App = () => {
   useEffect(() => {
-    //Assign interval to a variable to clear it, get the data every 2 seconds
     const intervalId = setInterval(() => {  
       axios
-      .get('http://localhost:3001/notes')
+      .get(baseUrl)
       .then(response => {
-        console.log('render new data')
+        // console.log('render new data')
         // var tmp = response.data
         // tmp = tmp.filter(note=>{return((Date.now() - Date.parse(note.snapshotTimestamp)) < 600000)})
         setNotes(response.data)
       })
       .catch(error=>{
         //Too many requests, take a rest for 30s
-        if(error.response.status === 429){
+        if(error){
           setTimeout(function() {
             console.log("Take a rest for 30s!");
           }, 30000);
